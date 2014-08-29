@@ -73,19 +73,17 @@ class Jpeg {
 
   public function setCols()
   {
-    $this->setDims();
-
     if (isset($this->rows) && isset($this->cols))
       return;
 
-    $rCols = floor($this->width / self::DEFAULT_TILE_SIZE);
-    $rRows = floor($this->height / self::DEFAULT_TILE_SIZE);
+    $rCols = floor($this->width / $this->getTileSize());
+    $rRows = floor($this->height / $this->getTileSize());
 
-    $cols = $rCols * self::DEFAULT_TILE_SIZE < $this->width
+    $cols = $rCols * $this->getTileSize() < $this->width
       ? $rCols + 1
       : $rCols;
 
-    $rows = $rRows * self::DEFAULT_TILE_SIZE < $this->height
+    $rows = $rRows * $this->getTileSize() < $this->height
       ? $rRows + 1
       : $rRows;
 
@@ -197,7 +195,7 @@ class Jpeg {
     $this->makeSalient();
     $this->makeSlices();
 
-    $tileSize = self::DEFAULT_TILE_SIZE;
+    $tileSize = $this->_tileSize;
     $cols = $this->cols;
     $rows = $this->rows;
 
