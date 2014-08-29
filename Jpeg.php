@@ -4,7 +4,9 @@ class Jpeg {
   const SALIENT_FILE_NAME = 'salient.jpg';
   const DEFAULT_TILE_SIZE = 64;
   const MAX_COMPRESSION   = 90;
-  const MIN_SALIENCE      = 0.90;
+
+  // If this is half as important as you think it is, don't compress it
+  const MIN_SALIENCE      = 0.50;
 
   public $img;
   public $height;
@@ -170,7 +172,8 @@ class Jpeg {
       return $this->_salient;
 
     $this->_salient = $this->getStorage() . '/' . self::SALIENT_FILE_NAME;
-    `SaliencyDetector -q -L0 -U{$this->getThreshold()} "{$this->img}" {$this->_salient}`;
+    //`SaliencyDetector -q -L0 -U{$this->getThreshold()} "{$this->img}" {$this->_salient}`;
+    `SaliencyDetector "{$this->img}" {$this->_salient}`;
 
     return $this->_salient;
   }
@@ -212,6 +215,7 @@ class Jpeg {
         $mean = `identify -size "{$this->width}"x"{$this->height}" -channel Gray -format "%[fx:255*mean]" "{$this->_salient}[{$tileSize}x{$tileSize}+{$xOffset}+{$yOffset}]"`;
 
         $current = sprintf('tile-%06d', $count);
+
         // If it's not important, compress the shit out of it
         if ($mean < self::MIN_SALIENCE) {
           $file = "{$this->getStorage()}/{$current}.jpg";
