@@ -2,18 +2,20 @@
 
 class Jpeg {
   const SALIENT_FILE_NAME = 'salient.jpg';
-  const TILE_SIZE = 32;
-  const MAX_COMPRESSION = 90;
-  const MIN_SALIENCE = 0.90;
+  const DEFAULT_TILE_SIZE = 64;
+  const MAX_COMPRESSION   = 90;
+  const MIN_SALIENCE      = 0.90;
 
   public $img;
   public $height;
   public $width;
   public $rows;
   public $cols;
-  public $tileSize;
-  public $threshold;
-  protected $_isValid = false;
+  protected $_tileSize;
+  protected $_threshold;
+  protected $_isValid;
+  protected $_isCompressed;
+  protected $_isSliced;
   protected $_path;
   protected $_salient;
 
@@ -27,7 +29,7 @@ class Jpeg {
   {
     $this->img = $img;
 
-    if (! $this->validateImg())
+    if (! $this->isValid())
       throw new Exception('Cannot call Jpeg on a non-jpeg image');
   }
 
@@ -48,10 +50,10 @@ class Jpeg {
     return true;
   }
 
-  protected function validateImg()
+  public function isValid()
   {
-    if ($this->_isValid)
-      return true;
+    if (isset($this->_isValid))
+      return $this->_isValid;
 
     if (! isset($this->img) || ! $this->isFile() || ! $this->isJpeg())
       return false;
@@ -60,7 +62,7 @@ class Jpeg {
     return true;
   }
 
-  public function getDims()
+  public function setDims()
   {
     if (isset($this->width) && isset($this->height))
       return;
@@ -69,48 +71,59 @@ class Jpeg {
     $this->width = `identify -format %w {$this->img}`;
   }
 
-  public function getCols()
+  public function setCols()
   {
-    $this->getDims();
+    $this->setDims();
 
     if (isset($this->rows) && isset($this->cols))
       return;
 
-    $rCols = floor($this->width / self::TILE_SIZE);
-    $rRows = floor($this->height / self::TILE_SIZE);
+    $rCols = floor($this->width / self::DEFAULT_TILE_SIZE);
+    $rRows = floor($this->height / self::DEFAULT_TILE_SIZE);
 
-    $cols = $rCols * self::TILE_SIZE < $this->width
-      ? $rCols + 1 : $rCols;
+    $cols = $rCols * self::DEFAULT_TILE_SIZE < $this->width
+      ? $rCols + 1
+      : $rCols;
 
-    $rows = $rRows * self::TILE_SIZE < $this->height
-      ? $rRows + 1 : $rRows;
+    $rows = $rRows * self::DEFAULT_TILE_SIZE < $this->height
+      ? $rRows + 1
+      : $rRows;
 
     $this->rows = $rows;
     $this->cols = $cols;
   }
 
-  public function findTileSize()
+  public function getTileSize()
   {
+    if (isset($this->_tileSize))
+      return $this->_tileSize;
+
     if (! $this->width || ! $this->height)
-      $this->getDims();
+      $this->setDims();
 
     $smallestDim = $this->width < $this->height
       ? $this->width
       : $this->height;
 
-    $this->tileSize = self::TILE_SIZE;
+    $this->_tileSize = self::DEFAULT_TILE_SIZE;
 
-    if ( $smallestDim >= 1025 && $smallestDim <= 2560 ) {
-      $this->tileSize = 128;
+    if ($smallestDim < 256) {
+      $this->_tileSize = 16;
+    } else if ($smallestDim >= 257 && $smallestDim <= 512 ) {
+      $this->_tileSize = 32;
+    } else if ( $smallestDim >= 1025 && $smallestDim <= 2560 ) {
+      $this->_tileSize = 128;
     } else if ( $smallestDim >= 2561 ) {
-      $this->tileSize = 256;
+      $this->_tileSize = 256;
     }
+
+    return $this->_tileSize;
   }
 
-  public function findThreshold()
+  public function getThreshold()
   {
-    if (isset($this->threshold))
-      return;
+    if (isset($this->_threshold))
+      return $this->_threshold;
 
     $upper = 100;
     $lower = 0;
@@ -131,11 +144,15 @@ class Jpeg {
     if ($meanGray < 20)
       $lower = 50;
 
-    $this->threshold = ($upper - $lower)/ 2 + $lower;
+    $this->_threshold = ($upper - $lower)/ 2 + $lower;
+    return $this->_threshold;
   }
 
-  protected function makePath()
+  protected function getStorage()
   {
+    if (isset($this->_path))
+      return $this->_path;
+
     $hash = md5(microtime());
     $this->_path = '/tmp/' . implode('/', str_split(substr($hash, 0, 5)));
 
@@ -146,34 +163,41 @@ class Jpeg {
     return $this->_path;
   }
 
-  public function makeStorage()
+  protected function makeSalient()
   {
-    if (! isset($this->_path))
-      $this->makePath();
+    if (! $this->isValid())
+      throw new Exception('Cannot make salient image without valid image');
 
-    return $this->_path;
+    if (isset($this->_salient))
+      return $this->_salient;
+
+    $this->_salient = $this->getStorage() . '/' . self::SALIENT_FILE_NAME;
+    `SaliencyDetector -q -L0 -U{$this->getThreshold()} "{$this->img}" {$this->_salient}`;
+
+    return $this->_salient;
   }
 
-  public function makeSalient()
+  protected function makeSlices()
   {
-    $this->validateImg();
-    $this->_salient = $this->makeStorage() . '/' . self::SALIENT_FILE_NAME;
-    $this->findThreshold();
-    `SaliencyDetector -q -L0 -U{$this->threshold} "{$this->img}" {$this->_salient}`;
+    if (isset($this->_isSliced) && $this->_isSliced)
+      return;
+
+    $tileSize = $this->getTileSize();
+    `convert "{$this->img}" -crop "{$tileSize}"x"{$tileSize}" +repage +adjoin "{$this->getStorage()}/tile-%06d.jpg"`;
+    $this->_isSliced = true;
   }
 
-  public function makeSlices()
+  protected function makeCompressed()
   {
-    $tileSize = self::TILE_SIZE;
-    `convert "{$this->img}" -crop "{$tileSize}"x"{$tileSize}" +repage +adjoin "{$this->makeStorage()}/tile-%06d.jpg"`;
-  }
+    if (isset($this->_isCompressed) && $this->_isCompressed)
+      return;
 
-  public function compress()
-  {
-    $this->getDims();
-    $this->getCols();
+    $this->setDims();
+    $this->setCols();
+    $this->makeSalient();
+    $this->makeSlices();
 
-    $tileSize = self::TILE_SIZE;
+    $tileSize = self::DEFAULT_TILE_SIZE;
     $cols = $this->cols;
     $rows = $this->rows;
 
@@ -192,30 +216,34 @@ class Jpeg {
         $current = sprintf('tile-%06d', $count);
         // If it's not important, compress the shit out of it
         if ($mean < self::MIN_SALIENCE) {
-          $file = "{$this->makeStorage()}/{$current}.jpg";
+          $file = "{$this->getStorage()}/{$current}.jpg";
           imagejpeg(imagecreatefromjpeg($file), $file, self::MAX_COMPRESSION);
         }
         $count++;
       }
     }
 
+    $this->_isCompressed = true;
   }
 
-  public function reassemble()
+  protected function makeAssembled()
   {
+    if (! $this->_isCompressed)
+      return false;
+
     $cols = $this->cols;
     $rows = $this->rows;
-    $files = "$(find \"{$this->makeStorage()}\" -name \"tile-*.jpg\" | sort)";
-    $out = __DIR__ . '/out.jpg';
+    $files = "$(find \"{$this->getStorage()}\" -name \"tile-*.jpg\" | sort)";
+    $out = "{$this->getStorage()}/out.jpg";
 
     `montage -mode concatenate -tile "{$cols}x{$rows}" -- {$files} {$out}`;
+
+    return $out;
   }
 
   public function optimize()
   {
-    $this->makeSalient();
-    $this->makeSlices();
-    $this->compress();
-    $this->reassemble();
+    $this->makeCompressed();
+    return $this->makeAssembled();
   }
 }
