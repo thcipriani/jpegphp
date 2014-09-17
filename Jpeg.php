@@ -1,12 +1,13 @@
 <?php
 
 class Jpeg {
-  const SALIENT_FILE_NAME = 'salient.jpg';
-  const DEFAULT_TILE_SIZE = 64;
-  const MAX_COMPRESSION   = 90;
+  const SALIENT_FILE_NAME   = 'salient.png';
+  const DEFAULT_TILE_SIZE   = 64;
+  const MAX_COMPRESSION     = 60;
+  const DEFAULT_COMPRESSION = 92;
 
-  // If this is half as important as you think it is, don't compress it
-  const MIN_SALIENCE      = 0.50;
+  // how important does this have to be before you compress it (scale 0-255)
+  const MIN_SALIENCE = 1;
 
   public $img;
   public $height;
@@ -20,6 +21,7 @@ class Jpeg {
   protected $_isSliced;
   protected $_path;
   protected $_salient;
+  protected $_quality;
 
   public function __construct($img = false)
   {
@@ -93,6 +95,21 @@ class Jpeg {
     $this->cols = $cols;
   }
 
+  protected function setDefaultQuality()
+  {
+    if (isset($this->_quality))
+      return;
+
+    $currentCompression = `identify -format "%Q" {$this->img}`;
+    $this->_quality = min($currentCompression, self::DEFAULT_COMPRESSION);
+  }
+
+  public function getDefaultQuality()
+  {
+    $this->setDefaultQuality();
+    return $this->_quality;
+  }
+
   public function getTileSize()
   {
     if (isset($this->_tileSize))
@@ -128,23 +145,28 @@ class Jpeg {
     $upper = 100;
     $lower = 0;
     $redo = false;
+    $meanGray = 0;
+    $this->_threshold = 50;
 
     $getMeanGray = function($opts) {
-      return `SaliencyDetector -q -L{$opts['lower']} -U{$opts['upper']} "{$this->img}" "png:-" | identify -channel Gray -format "%[fx:255*mean]" -`;
+      return `SaliencyDetector -q -L{$opts['lower']} -U{$opts['upper']} "{$this->img}" "png:-" | identify -format "%[fx:100*mean]" -`;
     };
 
-    $meanGray = $getMeanGray([
-      'lower' => $lower,
-      'upper' => $upper,
-    ]);
+    while (($meanGray > 40 || $meanGray < 20) && $lower < $upper - 1) {
+      $meanGray = $getMeanGray([
+        'lower' => $lower,
+        'upper' => $upper,
+      ]);
 
-    if ($meanGray > 40)
-      $upper -= 50;
+      if ($meanGray > 40)
+        $lower = $this->_threshold;
 
-    if ($meanGray < 20)
-      $lower = 50;
+      if ($meanGray < 20)
+        $upper = $this->_threshold;
 
-    $this->_threshold = ($upper - $lower)/ 2 + $lower;
+      $this->_threshold = ($upper - $lower)/ 2 + $lower;
+    }
+
     return $this->_threshold;
   }
 
@@ -172,8 +194,9 @@ class Jpeg {
       return $this->_salient;
 
     $this->_salient = $this->getStorage() . '/' . self::SALIENT_FILE_NAME;
-    //`SaliencyDetector -q -L0 -U{$this->getThreshold()} "{$this->img}" {$this->_salient}`;
-    `SaliencyDetector "{$this->img}" {$this->_salient}`;
+    // `SaliencyDetector -q -L0 -U{$this->getThreshold()} "{$this->img}" {$this->_salient}`;
+    `SaliencyDetector -q -L0 -U25 "{$this->img}" {$this->_salient}`;
+    // `SaliencyDetector "{$this->img}" {$this->_salient}`;
 
     return $this->_salient;
   }
@@ -184,7 +207,8 @@ class Jpeg {
       return;
 
     $tileSize = $this->getTileSize();
-    `convert "{$this->img}" -crop "{$tileSize}"x"{$tileSize}" +repage +adjoin "{$this->getStorage()}/tile-%06d.jpg"`;
+    $quality = $this->getDefaultQuality();
+    `convert "{$this->img}" -strip -quality {$quality} -crop "{$tileSize}"x"{$tileSize}" +repage +adjoin "{$this->getStorage()}/tile-%06d.jpg"`;
     $this->_isSliced = true;
   }
 
@@ -198,24 +222,30 @@ class Jpeg {
     $this->makeSalient();
     $this->makeSlices();
 
-    $tileSize = $this->_tileSize;
     $cols = $this->cols;
     $rows = $this->rows;
 
     $count = 0;
-    $countn = 0;
 
     // Loop through all the tiles
-    for($x = 0; $x < $cols; $x++) {
-      for($y = 0; $y < $rows; $y++) {
-        $xOffset = $x * $tileSize;
-        $yOffset = $y * $tileSize;
+    for($y = 0; $y < $rows; $y++) {
+      for($x = 0; $x < $cols; $x++) {
+        $xOffset = $x * $this->getTileSize();
+        $yOffset = $y * $this->getTileSize();
+
+        $tileW = $this->getTileSize();
+        $tileH = $this->getTileSize();
+
+        if ($y + 1 === $rows && (($rows * $this->getTileSize()) > $this->height))
+          $tileH = ($y + 1) * $this->getTileSize() - $this->height;
+
+        if ($x + 1 === $rows && (($cols * $this->getTileSize()) > $this->width))
+          $tileW = ($x + 1) * $this->getTileSize() - $this->width;
 
         // Find the mean saliency of the tile
-        $mean = `identify -size "{$this->width}"x"{$this->height}" -channel Gray -format "%[fx:255*mean]" "{$this->_salient}[{$tileSize}x{$tileSize}+{$xOffset}+{$yOffset}]"`;
+        $mean = `identify -size "{$this->width}"x"{$this->height}" -channel Gray -format "%[fx:255*mean]" "{$this->_salient}[{$tileW}x{$tileH}+{$xOffset}+{$yOffset}]"`;
 
         $current = sprintf('tile-%06d', $count);
-
         // If it's not important, compress the shit out of it
         if ($mean < self::MIN_SALIENCE) {
           $file = "{$this->getStorage()}/{$current}.jpg";
@@ -237,8 +267,9 @@ class Jpeg {
     $rows = $this->rows;
     $files = "$(find \"{$this->getStorage()}\" -name \"tile-*.jpg\" | sort)";
     $out = "{$this->getStorage()}/out.jpg";
+    $quality = $this->getDefaultQuality();
 
-    `montage -mode concatenate -tile "{$cols}x{$rows}" -- {$files} {$out}`;
+    `montage -strip -quality {$quality} -mode concatenate -tile "{$cols}x{$rows}" -- {$files} {$out}`;
 
     return $out;
   }
