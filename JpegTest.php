@@ -8,7 +8,7 @@ class JpegTest extends PHPUnit_Framework_Testcase
 
   public function setup()
   {
-    $this->jpeg = new Jpeg(__DIR__ . '/sik.jpg');
+    $this->jpeg = new Jpeg(__DIR__ . '/edison_board.jpg');
   }
 
   public function testShouldBeAValidJpegFile()

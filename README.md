@@ -1,18 +1,8 @@
 Comparison of JPEG Compression methods
 ===
 
-Original (171kB)
----
-![original](https://raw.githubusercontent.com/thcipriani/jpegphp/master/sik.jpg)
+Check out the circut board pattern and the Intel Logo—worth the 35kB
 
-PHP-GD (68kB)
----
-
-Using PHP-GD with a compression setting of 90
-
-![gd90](https://raw.githubusercontent.com/thcipriani/jpegphp/master/sik-gd90.jpg)
-
-This thing (87kB)
----
-
-![optimized](https://raw.githubusercontent.com/thcipriani/jpegphp/master/sik-optimized.jpg)
+| Original | 489 kB  | ![original](https://raw.githubusercontent.com/thcipriani/jpegphp/master/edison_board.jpg)  |
+| PHP-GD (90 setting) | 176 kB | ![gd90](https://raw.githubusercontent.com/thcipriani/jpegphp/master/edison_board-gd90.jpg) |
+| This | 214 kB | ![optimized](https://raw.githubusercontent.com/thcipriani/jpegphp/master/edison_board-optimized.jpg) |

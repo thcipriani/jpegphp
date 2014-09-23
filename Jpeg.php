@@ -3,8 +3,8 @@
 class Jpeg {
   const SALIENT_FILE_NAME   = 'salient.png';
   const DEFAULT_TILE_SIZE   = 64;
-  const MAX_COMPRESSION     = 60;
-  const DEFAULT_COMPRESSION = 92;
+  const MAX_COMPRESSION     = 50;
+  const DEFAULT_COMPRESSION = 90;
 
   // how important does this have to be before you compress it (scale 0-255)
   const MIN_SALIENCE = 1;
@@ -194,9 +194,7 @@ class Jpeg {
       return $this->_salient;
 
     $this->_salient = $this->getStorage() . '/' . self::SALIENT_FILE_NAME;
-    // `SaliencyDetector -q -L0 -U{$this->getThreshold()} "{$this->img}" {$this->_salient}`;
     `SaliencyDetector -q -L0 -U25 "{$this->img}" {$this->_salient}`;
-    // `SaliencyDetector "{$this->img}" {$this->_salient}`;
 
     return $this->_salient;
   }
@@ -267,11 +265,13 @@ class Jpeg {
     $rows = $this->rows;
     $files = "$(find \"{$this->getStorage()}\" -name \"tile-*.jpg\" | sort)";
     $out = "{$this->getStorage()}/out.jpg";
+    $final = "{$this->getStorage()}/final.jpg";
     $quality = $this->getDefaultQuality();
 
     `montage -strip -quality {$quality} -mode concatenate -tile "{$cols}x{$rows}" -- {$files} {$out}`;
+    `jpegtran -copy none -optimize -progressive -perfect "{$out}" > "{$final}"`;
 
-    return $out;
+    return $final;
   }
 
   public function optimize()
